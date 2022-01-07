@@ -1,0 +1,291 @@
+---
+title: "Statistics In Practise Assignment I"
+author: "124384 - Luycer Bosire"
+date: "9/19/2021"
+output:
+  html_document: default
+  word_document: default
+  pdf_document: default
+---
+
+#Question 5 - Resampling Methods  
+
+In Chapter 4, we used logistic regression to predict the probability of default using income and balance on the Default data set. We will now estimate the test error of this logistic regression model using the validation set approach. Do not forget to set a random seed before beginning your analysis.  
+(a) Fit a logistic regression model that uses income and balance to predict default.  
+
+We load our data set from the `ISLR` package and fit a logistic regression model using the `glm()` function in r:  
+
+```{r}
+library(ISLR)
+library(kableExtra)
+attach(Default)
+
+set.seed (1234)
+model<- glm(default~balance+income,family="binomial",data=Default)
+summarytable<-data.frame(cbind(round(model$coefficients,4),model$null.deviance,model$deviance,model$aic))
+colnames(summarytable)<-c("Coefficients","Null Deviance","Residual Deviance","AIC")
+summarytable
+```
+
+The data set contains data relating to the income and loan balances of 10,000 students and their probability of defaulting.  
+
+(b) Using the validation set approach, estimate the test error of this model. In order to do this, you must perform the following steps:  
+i. Split the sample set into a training set and a validation set.  
+We use 80% of the data set to form our training set and the remaining 20% as our validation set.
+ 
+```{r}
+library(dplyr)
+library(caret)
+set.seed(1234)
+Default$studentn<-ifelse(Default$student=="No",0,1)
+training.samples <- Default$default %>%
+  createDataPartition(p = 0.8, list = FALSE)
+train.data  <- Default[training.samples, ]
+test.data <- Default[-training.samples, ]
+```
+
+ii. Fit a multiple logistic regression model using only the training observations.  
+
+```{r}
+lm.fit<-glm(income~balance,data=train.data )
+summary(lm.fit)
+```
+
+iii. Obtain a prediction of default status for each individual in the validation set by computing the posterior probability of default for that individual, and classifying the individual to the default category if the posterior probability is greater than 0.5.  
+
+```{r echo=FALSE}
+predictions = predict(lm.fit, newdata = test.data, type = "response")
+
+predicted_classes <- as.factor(ifelse(predictions >= 0.5,"Yes", "No"))
+
+
+#We use the confusion matrix or error matrix is to summarize the performance of a classification algorithm.
+
+modelaccuracy<-confusionMatrix(predicted_classes,test.data$default)
+```
+
+iv. Compute the validation set error, which is the fraction of the observations in the validation set that are mis-classified.  
+
+```{r, include=FALSE}
+
+table.1<-kable(data.frame(as.matrix(modelaccuracy$table)), format = "latex", booktabs = TRUE, caption = 'confusionMatrix: table')
+kable_styling(table.1, latex_options = c("hold_position","scale_down","striped"), position = "center")%>%
+column_spec(1, width = "8cm")
+```
+
+(c) Repeat the process in (b) three times, using three different splits of the observations into a training set and a validation set. Comment on the results obtained.  
+
+The process of splitting the data into k-folds can be repeated a number of times, this is called repeated k-fold cross validation. The final model error is taken as the mean error from the number of repeats.
+
+```{r, echo=FALSE}
+train.control <- trainControl(method = "cv", number = 3)
+# Train the model
+
+modelcontrol <- train(default~balance+income, data = train.data, method = "glm",
+               trControl = train.control)
+
+
+newdata<-data.frame(cbind(round(modelcontrol$finalModel$coefficients,4),modelcontrol$finalModel$null.deviance,modelcontrol$finalModel$deviance,modelcontrol$finalModel$aic))
+colnames(newdata)<-c("Coefficients","Null Deviance","Residual Deviance","AIC")
+
+# Summarize the results
+print(modelcontrol)
+```
+
+The model's predictive power is at 97% accuracy with a kappa value of 0.4.
+
+(d) Now consider a logistic regression model that predicts the probability of default using income, balance, and a dummy variable for student. Estimate the test error for this model using the validation set approach. Comment on whether or not including a dummy variable for student leads to a reduction in the test error rate.  
+
+```{r, echo=FALSE}
+# Build the model
+model_dummy <- glm(default~balance+income+studentn,family="binomial",data=train.data)
+
+predictions = predict(model_dummy, newdata = test.data, type = "response")
+predicted_classes <- as.factor(ifelse(predictions >= 0.5,"Yes", "No"))
+result_dummy<-(confusionMatrix(predicted_classes, test.data$default))
+result_dummy
+```
+
+#Question 6  - Resampling methods  
+
+We continue to consider the use of a logistic regression model to predict the probability of default using income and balance on the Default data set. In particular, we will now compute estimates for the standard errors of the income and balance logistic regression coefficients in two different ways: (1) using the bootstrap, and (2) using the standard formula for computing the standard errors in the glm() function. Do not forget to set a random seed before beginning your
+analysis.  
+(a) Using the summary() and glm() functions, determine the estimated standard errors for the coefficients associated with income and balance in a multiple logistic regression model that uses both predictors.  
+
+```{r}
+library(ISLR)
+attach(Default)
+set.seed (1)
+model<- glm(income~balance, data = Default)
+summary(model)
+```
+The standard error for the income coefficient is `263.0699` and for the balance coefficient is `0.2725`. 
+
+(b) Write a function, boot.fn(), that takes as input the Default data set as well as an index of the observations, and that outputs the coefficient estimates for income and balance in the multiple
+logistic regression model.  
+
+
+To illustrate the use of the bootstrap on this data, we must first create a function `boot.fn()` which takes as input the (X, Y) data as well as a vector indicating which observations should be used to estimate α. The function then outputs the estimate for α based on the selected observations.
+
+```{r, echo=FALSE, include=FALSE}
+boot.fn <- function(Default, i){
+	dataset <- Default[i,]
+	balance <- cor(dataset$income,dataset$balance)
+ 	return(cor(dataset$income,dataset$balance))
+}
+```
+
+
+```{r, echo=FALSE}
+library(boot)
+set.seed(8000)
+bootcorr <- boot(Default, boot.fn, R=500)
+bootcorr
+```
+
+(c) Use the boot() function together with your boot.fn() function to estimate the standard errors of the logistic regression coefficients for income and balance.  
+
+```{r}
+boot.fn<-function (Default,index)
+  return(coef(glm(income~balance,data=Default,subset =index)))
+boot.fn(Default ,1:8000)
+```
+
+(d) Comment on the estimated standard errors obtained using the glm() function and using your bootstrap function.  
+
+```{r}
+summary(glm(income~balance,data=Default))$coef
+```
+
+#Question 7 - Unsupervised learning  
+In Section 10.2.3, a formula for calculating PVE was given in Equation 10.8. We also saw that the PVE can be obtained using the sdev output of the prcomp() function. On the USArrests data, calculate PVE in two ways:  
+(a) Using the sdev output of the prcomp() function, as was done in Section 10.2.3.
+
+By default, the prcomp() function centers the variables to have mean zero. By using the option scale=TRUE, we scale the variables to have standard deviation one. The output from prcomp() contains a number of useful quantities. The center and scale components correspond to the means and standard
+deviations of the variables that were used for scaling prior to implementing PCA.
+
+```{r}
+pr.USArrests =prcomp (USArrests , scale =TRUE)
+
+pr.var.USArrests = pr.USArrests$sdev ^2 #The variance
+pve = pr.var.USArrests/sum(pr.var.USArrests)
+pve
+```
+
+We see that the first principal component explains 62% of the variance in the data, the next principal component explains 25% of the variance, and so forth
+
+(b) By applying Equation 10.8 directly. That is, use the prcomp() function to compute the principal component loadings. Then, use those loadings in Equation 10.8 to obtain the PVE. These two approaches should give the same results.  
+
+```{r}
+loadings <-pr.USArrests$rotation
+newdata <- scale(USArrests)
+sumvar <- sum(apply(as.matrix(newdata)^2, 2, sum))
+apply((as.matrix(newdata) %*% loadings)^2, 2, sum) / sumvar
+```
+The results are the same as in a above.  
+
+
+#Question 7 - Support Vector Machines  
+In this problem, you will use support vector approaches in order to predict whether a given car gets high or low gas mileage based on the Auto data set.  
+(a) Create a binary variable that takes on a 1 for cars with gas mileage above the median, and a 0 for cars with gas mileage below the median.
+
+```{r}
+library(ISLR)
+data("Auto")
+# Keep only numeric variables
+Auto <- Auto[,-9]
+attach(Auto)
+Auto$mpg.bin <- as.factor(ifelse(mpg > median(mpg), 1, 0))
+```
+
+(b) Fit a support vector classifier to the data with various values of cost, in order to predict whether a car gets high or low gas mileage. Report the cross-validation errors associated with different values of this parameter. Comment on your results.
+
+```{r}
+library (e1071)
+library(kableExtra)
+Auto1 <- Auto[,-1] #Exclude original mpg variable from covariates
+set.seed (1234)
+svm.cv=tune(svm, mpg.bin~., data=Auto1 , kernel ="linear", ranges =list(cost=c(0.001 , 0.01, 0.1, 1,5,10,100) ))
+sumfit1 <- summary(svm.cv)
+
+
+#CV Errors
+kable(sumfit1$performances, format = "simple", digits = 4, align = 'l', label = "Cross-Validation errors associated with different values of the cost parameter")
+
+#Best model
+bestmod <- svm.cv$best.model
+summary (bestmod )
+
+#Predicted classifications
+mpg.pred <- predict (bestmod ,Auto1)
+table(predict = mpg.pred , truth = Auto1$mpg.bin)
+
+```
+
+Based on the result, where the model cost = 1, we have the lowest cross-validation error rate. The best model is a linear kernel with cost = 0.01 and 88 support vectors, 43 in the first and 45 in the second class.
+
+With a cost of 0.01, 359 (out of 392) observations are correctly classified as high or low gas mileage.
+
+(c) Now repeat (b), this time using SVMs with radial and polynomial basis kernels, with different values of gamma and degree and cost. Comment on your results.
+```{r}
+#Cross-Validation to model with different values of gamma and degree and cost;
+
+# radial kernel
+svm.cv2 <- tune(svm , mpg.bin~., data=Auto1, kernel = "radial", ranges =list(cost=c(0.1 ,1 ,10 ,100 ,1000),
+gamma=c(0.5,1,2,3,4) ))
+sumfit2 <- summary(svm.cv2)
+
+#CV Errors
+kable(sumfit2$performances, format = "simple", digits = 4, align = 'l', label = "Cross-Validation errors for radical kernel associated with different values of the cost parameter and Gamma")
+
+#Best model
+bestmod2 <- svm.cv2$best.model
+summary (bestmod2)
+
+#Predicted classifications
+mpg.pred2 <- predict(bestmod2, Auto1)
+table(predict = mpg.pred2, truth = Auto1$mpg.bin)
+
+# polynomial kernel
+svm.cv3 <- tune(svm , mpg.bin~., data=Auto1, kernel = "polynomial", ranges =list(cost=c(0.1, 1, 10, 100 ,1000, 10000),
+degree=c(2,4,6,8,10) ))
+sumfit3 <- summary(svm.cv3)
+
+#CV Errors
+kable(sumfit3$performances, format = "simple", digits = 4, align = 'l', label = "Cross-Validation errors for polynomial kernel associated with different values of the cost parameter and degree")
+
+#Best model
+bestmod3 <- svm.cv3$best.model
+summary (bestmod3)
+
+#Predicted classifications
+mpg.pred3 <- predict(bestmod3, Auto1)
+table(predict = mpg.pred3, truth = Auto1$mpg.bin)
+```
+The best choice of parameters involves cost=1 for the radical kernel; and cost=100 degree=4 for the polynomial kernel. 
+
+(d) Make some plots to back up your assertions in (b) and (c).
+Hint: In the lab, we used the plot() function for svm objects only in cases with p = 2. When p > 2, you can use the plot() function to create plots displaying pairs of variables at a time. Essentially, instead of typing 
+
+```{r}
+# Plots
+svmfit1 <- svm(mpg.bin~., data=Auto1 , kernel ="linear", cost =0.01, scale =FALSE )
+svmfit2 <- svm(mpg.bin~., data=Auto1, kernel = "radial", cost=1, gamma=0.5)
+svmfit3 <- svm(mpg.bin~., data=Auto1, kernel = "polynomial", cost=1000, degree=2)
+
+p11 <- plot(svmfit1  ,Auto1 , horsepower~weight)
+#p1l <- plot(svmfit1  ,Auto1 , displacement~weight)
+#p13 <- plot(svmfit1  ,Auto1 , year~origin)
+
+p21 <- plot(svmfit2  ,Auto1 , horsepower~weight)
+#p22 <- plot(svmfit1  ,Auto1 , displacement~weight)
+#p23 <- plot(svmfit1  ,Auto1 , year~origin)
+
+p31 <- plot(svmfit3  ,Auto1 , horsepower~weight)
+#p32 <- plot(svmfit1  ,Auto1 , displacement~weight)
+#p33 <- plot(svmfit1  ,Auto1 , year~origin)
+
+```
+In the above plots, Support vectors are marked as “x”, and other points as “o”. 
+The linear kernel plot has the best classification rate, with only a few points overlapping. 
+The radical and polynomial plots show more overlap compared to the linear plot. 
